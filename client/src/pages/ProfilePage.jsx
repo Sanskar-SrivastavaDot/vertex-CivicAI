@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import { getStoredUser, getToken, clearAuth, formatCitizenId, avatarUrl, isAuthenticated } from '../utils/auth';
 import { useAuth } from '../context/AuthContext';
+import { BACKEND_URL } from '../utils/api';
 
 export default function ProfilePage() {
   const navigate = useNavigate();
@@ -44,7 +45,7 @@ export default function ProfilePage() {
     if (!token) return;
     try {
       setIssuesLoading(true);
-      const res = await fetch('http://localhost:5000/api/issues/my', {
+      const res = await fetch(`${BACKEND_URL}/api/issues/my`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (res.ok) {
@@ -103,7 +104,7 @@ export default function ProfilePage() {
     // Try to refresh profile from backend (gracefully degrade if offline)
     const token = getToken();
     if (token) {
-      fetch('http://localhost:5000/api/auth/profile', {
+      fetch(`${BACKEND_URL}/api/auth/profile`, {
         headers: { Authorization: `Bearer ${token}` },
       })
         .then(r => r.ok ? r.json() : null)
@@ -154,7 +155,7 @@ export default function ProfilePage() {
     // Optionally persist to backend (non-blocking)
     if (token) {
       try {
-        await fetch('http://localhost:5000/api/auth/profile', {
+        await fetch(`${BACKEND_URL}/api/auth/profile`, {
           method: 'PUT',
           headers: {
             'Content-Type': 'application/json',
@@ -187,7 +188,7 @@ export default function ProfilePage() {
     updateUser({ profileDetails: newDetails });
     const token = getToken();
     if (token) {
-      fetch('http://localhost:5000/api/auth/profile', {
+      fetch(`${BACKEND_URL}/api/auth/profile`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({ profileDetails: newDetails }),
@@ -208,7 +209,7 @@ export default function ProfilePage() {
     }
     const token = getToken();
     try {
-      const res = await fetch('http://localhost:5000/api/auth/password', {
+      const res = await fetch(`${BACKEND_URL}/api/auth/password`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({ currentPassword: passwordForm.current, newPassword: passwordForm.new }),
@@ -225,7 +226,7 @@ export default function ProfilePage() {
     setModalError('');
     const token = getToken();
     try {
-      const res = await fetch('http://localhost:5000/api/auth/account', {
+      const res = await fetch(`${BACKEND_URL}/api/auth/account`, {
         method: 'DELETE',
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -505,7 +506,7 @@ export default function ProfilePage() {
                         <td className="px-4 py-3">
                           <div className="w-14 h-10 rounded-lg overflow-hidden bg-slate-100 flex-shrink-0">
                             <img
-                              src={`http://localhost:5000${issue.imageUrl}`}
+                              src={`${BACKEND_URL}${issue.imageUrl}`}
                               alt="issue"
                               className="w-full h-full object-cover"
                               onError={e => { e.target.src = "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='56' height='40'><rect fill='%23f1f5f9' width='56' height='40'/><text x='50%' y='50%' dominant-baseline='middle' text-anchor='middle' fill='%2394a3b8' font-size='16'>🏙️</text></svg>"; }}

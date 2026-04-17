@@ -1,5 +1,6 @@
 import { createContext, useContext, useState, useCallback, useEffect } from 'react';
 import { getStoredUser, getToken, clearAuth } from '../utils/auth';
+import { BACKEND_URL } from '../utils/api';
 
 const AuthContext = createContext(null);
 
@@ -13,7 +14,7 @@ export function AuthProvider({ children }) {
     const token = getToken();
     if (!token) return;
 
-    fetch('http://localhost:5000/api/auth/profile', {
+    fetch(`${BACKEND_URL}/api/auth/profile`, {
       headers: { Authorization: `Bearer ${token}` },
     })
       .then(r => r.ok ? r.json() : null)

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { BACKEND_URL } from '../utils/api';
 
 export default function CitizenLoginPage() {
   const [form, setForm] = useState({ email: '', password: '', remember: false });
@@ -23,7 +24,7 @@ export default function CitizenLoginPage() {
     }
     setLoading(true);
     try {
-      const res = await fetch('http://localhost:5000/api/auth/login', {
+      const res = await fetch(`${BACKEND_URL}/api/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: form.email, password: form.password }),

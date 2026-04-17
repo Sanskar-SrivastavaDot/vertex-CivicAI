@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
+import { BACKEND_URL } from '../utils/api';
 
 export default function RegisterPage() {
   const [form, setForm] = useState({
@@ -48,7 +49,7 @@ export default function RegisterPage() {
     setError('');
     setLoading(true);
     try {
-      const res = await fetch('http://localhost:5000/api/auth/register', {
+      const res = await fetch(`${BACKEND_URL}/api/auth/register`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
