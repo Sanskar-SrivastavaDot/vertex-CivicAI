@@ -250,7 +250,7 @@ export default function LandingPage() {
             </div>
             <h1 className="landing-hero__headline">
               Your Grievance. <span className="landing-hero__highlight">Heard.</span>
-              <br />Resolved <span className="landing-hero__highlight">Transparently</span> with AI.
+              <br />Resolved <span className="landing-hero__highlight">Transparently</span>
             </h1>
             <p className="landing-hero__subheadline">
               An AI-assisted government portal for citizens to report civic issues, track official responses, and hold authorities accountable — transparently and efficiently.
