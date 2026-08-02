@@ -6,6 +6,7 @@ import { formatCitizenId } from '../utils/auth';
 import Spinner from '../components/Spinner';
 import LocationName from '../components/LocationName';
 import RoutePlanner from '../components/RoutePlanner';
+import TeamManager from '../components/TeamManager';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 const STATUS_FLOW   = ['Pending', 'In Progress', 'Resolved'];
@@ -806,6 +807,9 @@ export default function AdminPage() {
 
       {/* ── Route Optimizer ── */}
       {!loading && !error && <RoutePlanner />}
+
+      {/* ── Field Teams & Workers ── */}
+      {!loading && !error && <TeamManager />}
 
       {/* ── Tabs ── */}
       <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">

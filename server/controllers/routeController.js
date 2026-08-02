@@ -1,6 +1,8 @@
 const WorkTeam = require('../models/WorkTeam');
 const WorkRoute = require('../models/WorkRoute');
 const Issue = require('../models/Issue');
+const User = require('../models/User');
+const bcrypt = require('bcryptjs');
 const { optimizeAll, formatDuration } = require('../services/routeOptimizer');
 
 /** Normalize a date string / Date to a JS Date at local midnight. */
@@ -227,6 +229,176 @@ async function completeStop(req, res) {
 }
 
 /**
+ * POST /api/routes/teams
+ * Create a new work team (GOV).
+ * Body: { name, department, depot: { coordinates: [lng,lat], address }, capacity }
+ */
+async function createTeam(req, res) {
+  try {
+    const { name, department, depot, capacity } = req.body;
+    if (!name || !department) {
+      return res.status(400).json({ error: 'name and department are required.' });
+    }
+    const team = await WorkTeam.create({
+      name,
+      department,
+      depot: {
+        type: 'Point',
+        coordinates: Array.isArray(depot?.coordinates) ? depot.coordinates : [80.2707, 13.0827],
+        address: depot?.address || '',
+      },
+      capacity: {
+        maxWorkers: Number(capacity?.maxWorkers) || 6,
+        maxHoursPerDay: Number(capacity?.maxHoursPerDay) || 8,
+      },
+    });
+    return res.status(201).json({ message: 'Team created.', team });
+  } catch (err) {
+    console.error('❌ createTeam error:', err);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+}
+
+/**
+ * PUT /api/routes/teams/:id
+ * Update a work team's details (GOV).
+ */
+async function updateTeam(req, res) {
+  try {
+    const { id } = req.params;
+    const { name, department, depot, capacity } = req.body;
+
+    const team = await WorkTeam.findById(id);
+    if (!team) return res.status(404).json({ error: 'Team not found' });
+
+    if (name)       team.name = name;
+    if (department) team.department = department;
+    if (depot) {
+      team.depot.address = depot.address ?? team.depot.address;
+      if (Array.isArray(depot.coordinates)) team.depot.coordinates = depot.coordinates;
+    }
+    if (capacity) {
+      if (capacity.maxWorkers != null) team.capacity.maxWorkers = Number(capacity.maxWorkers);
+      if (capacity.maxHoursPerDay != null) team.capacity.maxHoursPerDay = Number(capacity.maxHoursPerDay);
+    }
+
+    await team.save();
+    return res.json({ message: 'Team updated.', team });
+  } catch (err) {
+    console.error('❌ updateTeam error:', err);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+}
+
+/**
+ * DELETE /api/routes/teams/:id
+ * Deactivate a work team (GOV). Soft-delete — kept for historical routes.
+ */
+async function deleteTeam(req, res) {
+  try {
+    const { id } = req.params;
+    const team = await WorkTeam.findById(id);
+    if (!team) return res.status(404).json({ error: 'Team not found' });
+
+    team.isActive = false;
+    await team.save();
+    return res.json({ message: 'Team deactivated.' });
+  } catch (err) {
+    console.error('❌ deleteTeam error:', err);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+}
+
+/**
+ * GET /api/routes/workers
+ * List GOV users who can be assigned as field workers.
+ */
+async function getWorkers(req, res) {
+  try {
+    const workers = await User.find({ role: 'GOV' })
+      .select('name email department')
+      .sort({ name: 1 });
+    return res.json({ workers });
+  } catch (err) {
+    console.error('❌ getWorkers error:', err);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+}
+
+/**
+ * POST /api/routes/workers
+ * Create a new GOV worker account (GOV).
+ * Body: { name, email, password, department }
+ */
+async function createWorker(req, res) {
+  try {
+    const { name, email, password, department } = req.body;
+    if (!name || !email || !password) {
+      return res.status(400).json({ error: 'name, email and password are required.' });
+    }
+
+    const existing = await User.findOne({ email });
+    if (existing) return res.status(400).json({ error: 'A user with this email already exists.' });
+
+    const hashedPassword = await bcrypt.hash(password, 10);
+    const user = await User.create({ name, email, password: hashedPassword, role: 'GOV', department: department || null });
+
+    return res.status(201).json({
+      message: 'Worker created.',
+      worker: { id: user._id, name: user.name, email: user.email, department: user.department },
+    });
+  } catch (err) {
+    console.error('❌ createWorker error:', err);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+}
+
+/**
+ * POST /api/routes/teams/:id/members
+ * Assign a GOV user to a team (GOV). Body: { userId }
+ */
+async function addTeamMember(req, res) {
+  try {
+    const { id } = req.params;
+    const { userId } = req.body;
+    if (!userId) return res.status(400).json({ error: 'userId is required.' });
+
+    const team = await WorkTeam.findById(id);
+    if (!team) return res.status(404).json({ error: 'Team not found' });
+
+    if (team.members.some((m) => m.toString() === userId)) {
+      return res.status(400).json({ error: 'User is already in this team.' });
+    }
+
+    team.members.push(userId);
+    await team.save();
+    return res.status(201).json({ message: 'Member added.', team });
+  } catch (err) {
+    console.error('❌ addTeamMember error:', err);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+}
+
+/**
+ * DELETE /api/routes/teams/:id/members/:memberId
+ * Remove a GOV user from a team (GOV).
+ */
+async function removeTeamMember(req, res) {
+  try {
+    const { id, memberId } = req.params;
+    const team = await WorkTeam.findById(id);
+    if (!team) return res.status(404).json({ error: 'Team not found' });
+
+    team.members = team.members.filter((m) => m.toString() !== memberId);
+    await team.save();
+    return res.json({ message: 'Member removed.', team });
+  } catch (err) {
+    console.error('❌ removeTeamMember error:', err);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+}
+
+/**
  * GET /api/routes/teams
  * List active work teams (for the planner UI).
  */
@@ -242,4 +414,16 @@ async function getTeams(req, res) {
   }
 }
 
-module.exports = { generateRoutes, getRoutes, completeStop, getTeams };
+module.exports = {
+  generateRoutes,
+  getRoutes,
+  completeStop,
+  getTeams,
+  createTeam,
+  updateTeam,
+  deleteTeam,
+  getWorkers,
+  createWorker,
+  addTeamMember,
+  removeTeamMember,
+};

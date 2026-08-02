@@ -129,3 +129,76 @@ export async function getTeams() {
   const response = await axios.get(`${API_BASE}/routes/teams`, { headers: authHeader() });
   return response.data;
 }
+
+/**
+ * GOV only — create a new work team.
+ * @param {{ name: string, department: string, depot?: {coordinates: number[], address?: string}, capacity?: {maxWorkers: number, maxHoursPerDay: number} }} body
+ */
+export async function createTeam(body) {
+  const response = await axios.post(`${API_BASE}/routes/teams`, body, {
+    headers: { 'Content-Type': 'application/json', ...authHeader() },
+  });
+  return response.data;
+}
+
+/**
+ * GOV only — update a work team.
+ * @param {string} id
+ * @param {{ name?: string, department?: string, depot?: object, capacity?: object }} body
+ */
+export async function updateTeam(id, body) {
+  const response = await axios.put(`${API_BASE}/routes/teams/${id}`, body, {
+    headers: { 'Content-Type': 'application/json', ...authHeader() },
+  });
+  return response.data;
+}
+
+/**
+ * GOV only — deactivate a work team (soft delete).
+ * @param {string} id
+ */
+export async function deleteTeam(id) {
+  const response = await axios.delete(`${API_BASE}/routes/teams/${id}`, { headers: authHeader() });
+  return response.data;
+}
+
+/**
+ * GOV only — list GOV users available as field workers.
+ */
+export async function getWorkers() {
+  const response = await axios.get(`${API_BASE}/routes/workers`, { headers: authHeader() });
+  return response.data;
+}
+
+/**
+ * GOV only — create a new GOV worker account.
+ * @param {{ name: string, email: string, password: string, department?: string }} body
+ */
+export async function createWorker(body) {
+  const response = await axios.post(`${API_BASE}/routes/workers`, body, {
+    headers: { 'Content-Type': 'application/json', ...authHeader() },
+  });
+  return response.data;
+}
+
+/**
+ * GOV only — assign a GOV user to a team.
+ * @param {string} teamId
+ * @param {string} userId
+ */
+export async function addTeamMember(teamId, userId) {
+  const response = await axios.post(`${API_BASE}/routes/teams/${teamId}/members`, { userId }, {
+    headers: { 'Content-Type': 'application/json', ...authHeader() },
+  });
+  return response.data;
+}
+
+/**
+ * GOV only — remove a GOV user from a team.
+ * @param {string} teamId
+ * @param {string} memberId
+ */
+export async function removeTeamMember(teamId, memberId) {
+  const response = await axios.delete(`${API_BASE}/routes/teams/${teamId}/members/${memberId}`, { headers: authHeader() });
+  return response.data;
+}
