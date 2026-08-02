@@ -31,8 +31,21 @@ const userSchema = new mongoose.Schema({
     default: {},
   },
   profilePicture: {
-    type: String,   // stored as base64 data-URI or a URL
+    type: String,
     default: '',
+    validate: {
+      validator: function (v) {
+        // Allow empty string, or must be a URL (not a base64 data URI)
+        return !v || v.startsWith('http://') || v.startsWith('https://');
+      },
+      message: 'profilePicture must be a URL. Upload the image to Cloudinary first and store the URL.',
+    },
+  },
+  // Department for GOV users (which category they manage)
+  department: {
+    type: String,
+    enum: ['Road & Traffic', 'Water & Drainage', 'Electricity', 'Sanitation', 'Public Property', null],
+    default: null,
   },
 }, {
   timestamps: true, // auto adds createdAt and updatedAt

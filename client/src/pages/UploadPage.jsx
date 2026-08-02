@@ -1,10 +1,20 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
-import { Camera, MapPin, Send, AlertTriangle, CheckCircle2, X, Loader2, Navigation } from 'lucide-react';
-import { submitIssue } from '../utils/api';
+import { Camera, MapPin, Send, AlertTriangle, CheckCircle2, X, Loader2, Navigation, Sparkles } from 'lucide-react';
+import { submitIssue, getIssueStatus } from '../utils/api';
 import Spinner from '../components/Spinner';
 import LocationName from '../components/LocationName';
 
 const MAX_FILE_SIZE_MB = 10;
+const POLL_INTERVAL_MS = 3000;
+const MAX_POLL_ATTEMPTS = 30; // ~90 seconds before giving up
+
+const AI_STAGES = [
+  'Scanning image with computer vision…',
+  'Classifying the issue type…',
+  'Checking for duplicate reports…',
+  'Estimating severity & priority…',
+  'Calculating workforce requirements…',
+];
 
 export default function UploadPage() {
   const [image, setImage] = useState(null);          // File object
@@ -15,10 +25,13 @@ export default function UploadPage() {
   const [isDragging, setIsDragging] = useState(false);
 
   const [loading, setLoading] = useState(false);
-  const [result, setResult] = useState(null);     // submission result
+  const [analyzing, setAnalyzing] = useState(false);  // polling AI status
+  const [result, setResult] = useState(null);        // submission result (success/duplicate)
+  const [analysisFailed, setAnalysisFailed] = useState(null); // error message string
   const [error, setError] = useState('');
 
   const fileInputRef = useRef(null);
+  const pollRef = useRef(null);
 
   // ── Geolocation ────────────────────────────────────────────────────────────
   const captureLocation = useCallback(() => {
@@ -48,6 +61,13 @@ export default function UploadPage() {
 
   // Auto-capture GPS when the page loads
   useEffect(() => { captureLocation(); }, [captureLocation]);
+
+  // Cleanup polling on unmount
+  useEffect(() => {
+    return () => {
+      if (pollRef.current) clearInterval(pollRef.current);
+    };
+  }, []);
 
   // ── Image Handling ─────────────────────────────────────────────────────────
   const handleFile = useCallback((file) => {
@@ -79,11 +99,68 @@ export default function UploadPage() {
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
+  // ── AI Analysis Polling ────────────────────────────────────────────────────
+  // Poll GET /:id/status until analysisStatus is completed/failed.
+  const startPolling = useCallback((issueId) => {
+    setAnalyzing(true);
+    let attempts = 0;
+
+    pollRef.current = setInterval(async () => {
+      attempts += 1;
+      try {
+        const status = await getIssueStatus(issueId);
+
+        if (status.analysisStatus === 'completed') {
+          clearInterval(pollRef.current);
+          pollRef.current = null;
+
+          if (status.duplicate) {
+            setResult({
+              message: 'This issue has already been reported and counted.',
+              duplicate: true,
+              reportCount: status.reportCount,
+              originalIssue: status.originalIssue,
+            });
+          } else {
+            setResult({
+              message: 'Your issue has been analyzed and dispatched to the right department.',
+              duplicate: false,
+              issue: status,
+            });
+          }
+          setAnalyzing(false);
+        } else if (status.analysisStatus === 'failed') {
+          clearInterval(pollRef.current);
+          pollRef.current = null;
+          setAnalysisFailed(
+            'AI analysis could not complete right now. Your report is saved — a team will review it manually.'
+          );
+          setAnalyzing(false);
+        } else if (attempts >= MAX_POLL_ATTEMPTS) {
+          // Timeout: report is saved, just notify completion
+          clearInterval(pollRef.current);
+          pollRef.current = null;
+          setAnalysisFailed('Analysis is taking longer than expected. Your report is saved and will be processed shortly.');
+          setAnalyzing(false);
+        }
+      } catch (err) {
+        // Transient error — keep polling
+        if (attempts >= MAX_POLL_ATTEMPTS) {
+          clearInterval(pollRef.current);
+          pollRef.current = null;
+          setAnalysisFailed('Could not reach the analysis service. Your report is saved and will be processed shortly.');
+          setAnalyzing(false);
+        }
+      }
+    }, POLL_INTERVAL_MS);
+  }, []);
+
   // ── Submit ─────────────────────────────────────────────────────────────────
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
     setResult(null);
+    setAnalysisFailed(null);
 
     if (!image) return setError('Please select an image.');
     if (!location) return setError('Please capture your location first.');
@@ -95,29 +172,67 @@ export default function UploadPage() {
       formData.append('latitude', location.latitude);
       formData.append('longitude', location.longitude);
 
+      // Returns 202 with issueId — AI runs in the background
       const data = await submitIssue(formData);
-      setResult(data);
-      clearImage();
-      setLocation(null);
+      setLoading(false);
+
+      startPolling(data.issueId);
     } catch (err) {
+      setLoading(false);
       let msg = err.response?.data?.message || err.response?.data?.error || 'Submission failed. Please try again.';
       if (err.response?.data?.details) msg += ` (${err.response.data.details})`;
-      // 409 no longer used — but keep for safety
-      if (err.response?.status === 409) {
-        setResult(err.response.data);
-      } else {
-        setError(msg);
-      }
-    } finally {
-      setLoading(false);
+      setError(msg);
     }
   };
 
   // ── Reset after result ─────────────────────────────────────────────────────
   const handleReset = () => {
+    if (pollRef.current) clearInterval(pollRef.current);
+    pollRef.current = null;
     setResult(null);
+    setAnalysisFailed(null);
     setError('');
+    setAnalyzing(false);
   };
+
+  // ── AI Analyzing screen ────────────────────────────────────────────────────
+  if (analyzing) {
+    const stageIdx = Math.min(Math.floor(Date.now() / 2000) % AI_STAGES.length, AI_STAGES.length - 1);
+    return (
+      <div className="max-w-lg mx-auto mt-16 p-8 bg-white rounded-2xl shadow-lg text-center">
+        <div className="w-16 h-16 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center mx-auto mb-4">
+          <Loader2 className="w-8 h-8 animate-spin" />
+        </div>
+        <h2 className="text-2xl font-bold text-slate-800 mb-2">AI is analyzing your report…</h2>
+        <p className="text-slate-500 text-sm mb-6">Our system is verifying your image and estimating the response needed. This usually takes under a minute.</p>
+
+        <div className="bg-slate-50 rounded-xl p-4 text-left mb-6 space-y-3">
+          {AI_STAGES.map((stage, i) => (
+            <div key={stage} className="flex items-center gap-3">
+              <span className={`w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0 ${
+                i < stageIdx ? 'bg-green-100 text-green-600' :
+                i === stageIdx ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-300'
+              }`}>
+                {i < stageIdx ? <CheckCircle2 className="w-3.5 h-3.5" /> : <span className="text-[10px] font-bold">{i + 1}</span>}
+              </span>
+              <span className={`text-sm ${i === stageIdx ? 'font-medium text-slate-800' : i < stageIdx ? 'text-slate-400' : 'text-slate-300'}`}>
+                {stage}
+              </span>
+            </div>
+          ))}
+        </div>
+
+        {preview && (
+          <img src={preview} alt="Submitted issue" className="w-24 h-24 object-cover rounded-lg mx-auto mb-6 border border-slate-200" />
+        )}
+
+        <div className="flex items-center gap-2 text-xs text-slate-400 justify-center mb-4">
+          <Sparkles className="w-3.5 h-3.5" />
+          <span>Vision + LLM classification running in background — you can close this page.</span>
+        </div>
+      </div>
+    );
+  }
 
   // ── Success screen (new unique issue) ─────────────────────────────────────
   if (result && !result.duplicate) {
@@ -130,6 +245,7 @@ export default function UploadPage() {
         <p className="text-slate-500 mb-4">{result.message}</p>
         <div className="bg-slate-50 rounded-xl p-4 text-left mb-6 space-y-2">
           <p className="text-sm"><span className="font-semibold text-slate-600">Description:</span> {result.issue?.description}</p>
+          <p className="text-sm"><span className="font-semibold text-slate-600">Category:</span> {result.issue?.category || 'Other'}</p>
           <p className="text-sm"><span className="font-semibold text-slate-600">Priority:</span> {result.issue?.priority}</p>
           <p className="text-sm"><span className="font-semibold text-slate-600">Status:</span> {result.issue?.status}</p>
           {result.issue?.latitude && result.issue?.longitude && (
@@ -184,6 +300,25 @@ export default function UploadPage() {
           </div>
         )}
 
+        <button
+          onClick={handleReset}
+          className="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 rounded-xl transition"
+        >
+          Report Another Issue
+        </button>
+      </div>
+    );
+  }
+
+  // ── Analysis failed / timeout screen ───────────────────────────────────────
+  if (analysisFailed) {
+    return (
+      <div className="max-w-lg mx-auto mt-16 p-8 bg-white rounded-2xl shadow-lg text-center">
+        <div className="w-16 h-16 bg-amber-50 text-amber-600 rounded-full flex items-center justify-center mx-auto mb-4 border border-amber-100">
+          <AlertTriangle className="w-8 h-8" />
+        </div>
+        <h2 className="text-2xl font-bold text-slate-800 mb-2">Report Received</h2>
+        <p className="text-slate-500 mb-6">{analysisFailed}</p>
         <button
           onClick={handleReset}
           className="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 rounded-xl transition"

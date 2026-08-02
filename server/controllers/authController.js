@@ -3,6 +3,10 @@ const jwt    = require('jsonwebtoken');
 const crypto = require('crypto');
 const User   = require('../models/User');
 
+if (!process.env.JWT_SECRET) {
+  throw new Error('FATAL: JWT_SECRET environment variable is not set. Server cannot start.');
+}
+
 // ─── Citizen ID Generator ─────────────────────────────────────────────────────
 /**
  * Generates a unique Citizen ID in the format CIV-XXXXXXXX
@@ -21,9 +25,18 @@ async function generateCitizenId() {
 
 const register = async (req, res) => {
   try {
-    const { name, email, password, role, profileDetails } = req.body;
+    const { name, email, password, role, profileDetails, govKey } = req.body;
 
-    const allowedRole = role === 'GOV' ? 'GOV' : 'Citizen';
+    // GOV accounts cannot be self-registered publicly.
+    // They require the GOV_ACCESS_KEY env secret (if configured) and are otherwise
+    // provisioned via the seedAdmin script.
+    let allowedRole = 'Citizen';
+    if (role === 'GOV') {
+      if (!process.env.GOV_ACCESS_KEY || govKey !== process.env.GOV_ACCESS_KEY) {
+        return res.status(403).json({ error: 'GOV registration requires a valid access key.' });
+      }
+      allowedRole = 'GOV';
+    }
 
     const existingUser = await User.findOne({ email });
     if (existingUser) {
@@ -32,15 +45,17 @@ const register = async (req, res) => {
 
     const hashedPassword = await bcrypt.hash(password, 10);
 
-    // Generate a unique Citizen ID only for Citizen accounts
-    const citizenId = allowedRole === 'Citizen' ? await generateCitizenId() : null;
+    // Generate a unique Citizen ID only for Citizen accounts.
+    // GOV accounts omit the field entirely (the sparse unique index only
+    // indexes documents that carry citizenId, so multiple GOVs never collide).
+    const citizenId = allowedRole === 'Citizen' ? await generateCitizenId() : undefined;
 
     const user = new User({
       name,
       email,
       password: hashedPassword,
       role: allowedRole,
-      citizenId,
+      ...(citizenId ? { citizenId } : {}),
       profileDetails: profileDetails || {},
     });
 
@@ -49,7 +64,7 @@ const register = async (req, res) => {
 
     const token = jwt.sign(
       { userId: user._id, role: user.role },
-      process.env.JWT_SECRET || 'fallback_secret_civicai',
+      process.env.JWT_SECRET,
       { expiresIn: '1d' }
     );
 
@@ -87,7 +102,7 @@ const login = async (req, res) => {
 
     const token = jwt.sign(
       { userId: user._id, role: user.role },
-      process.env.JWT_SECRET || 'fallback_secret_civicai',
+      process.env.JWT_SECRET,
       { expiresIn: '1d' }
     );
 

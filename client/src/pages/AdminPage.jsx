@@ -1,10 +1,11 @@
 import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { MapContainer, TileLayer, CircleMarker, Popup } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
-import { fetchIssues, updateIssueStatus } from '../utils/api';
+import { fetchIssues, updateIssueStatus, overrideWorkforce, recordResolution } from '../utils/api';
 import { formatCitizenId } from '../utils/auth';
 import Spinner from '../components/Spinner';
 import LocationName from '../components/LocationName';
+import RoutePlanner from '../components/RoutePlanner';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 const STATUS_FLOW   = ['Pending', 'In Progress', 'Resolved'];
@@ -145,11 +146,12 @@ function Row({ icon, label, value }) {
 }
 
 // ── Issue Card (Active issues — Pending & In Progress) ─────────────────────────
-function IssueCard({ issue, onAdvance, isUpdating, onViewCitizen }) {
+function IssueCard({ issue, onAdvance, isUpdating, onViewCitizen, onOverride }) {
   const next  = nextStatus(issue.status);
   const score = priorityScore(issue);
   const sc    = STATUS_COLORS[issue.status] || STATUS_COLORS['Pending'];
   const citizen = issue.createdBy;
+  const wf = issue.workforceEstimation;
 
   return (
     <div className={`bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden hover:shadow-md transition-shadow group`}>
@@ -234,6 +236,41 @@ function IssueCard({ issue, onAdvance, isUpdating, onViewCitizen }) {
           <LocationName lat={issue.latitude} lng={issue.longitude} className="truncate max-w-full" />
           <span>🗓️ {new Date(issue.createdAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}</span>
         </div>
+
+        {/* AI Workforce Estimate */}
+        {wf?.workerCount && (
+          <div className="bg-indigo-50 border border-indigo-100 rounded-xl px-3 py-2.5">
+            <div className="flex items-center justify-between mb-1.5">
+              <span className="text-[10px] font-bold text-indigo-500 uppercase tracking-wider">🤖 AI Workforce Estimate</span>
+              <span className="text-[10px] font-semibold text-indigo-400">
+                {(wf.confidence || 0) > 0 ? `${Math.round(wf.confidence * 100)}% conf` : ''}
+              </span>
+            </div>
+            <div className="flex items-center gap-3 text-xs text-indigo-800">
+              <span className="font-bold text-base">{wf.workerCount} workers</span>
+              <span className="text-indigo-400">·</span>
+              <span>~{wf.estimatedHours} hrs</span>
+              {wf.overriddenBy && (
+                <span className="text-[10px] bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded font-semibold">overridden</span>
+              )}
+            </div>
+            {wf.workerRoles?.length > 0 && (
+              <div className="mt-1.5 flex flex-wrap gap-1">
+                {wf.workerRoles.slice(0, 3).map(r => (
+                  <span key={r} className="text-[10px] bg-white border border-indigo-100 text-indigo-600 px-1.5 py-0.5 rounded font-medium">
+                    {r}
+                  </span>
+                ))}
+              </div>
+            )}
+            <button
+              onClick={() => onOverride(issue)}
+              className="mt-2 text-[11px] font-semibold text-indigo-600 hover:text-indigo-800 underline underline-offset-2"
+            >
+              Adjust Estimate
+            </button>
+          </div>
+        )}
 
         {/* Action */}
         <div>
@@ -439,6 +476,192 @@ function IssueMap({ issues }) {
   );
 }
 
+// ── Workforce Override Modal ───────────────────────────────────────────────────
+function OverrideModal({ issue, onClose, onSaved }) {
+  const wf = issue.workforceEstimation || {};
+  const [workerCount, setWorkerCount] = useState(wf.workerCount || 3);
+  const [estimatedHours, setEstimatedHours] = useState(wf.estimatedHours || 2);
+  const [overrideReason, setOverrideReason] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      await overrideWorkforce(issue._id, {
+        workerCount: Number(workerCount),
+        estimatedHours: Number(estimatedHours),
+        overrideReason,
+      });
+      onSaved();
+    } catch (err) {
+      alert(err.response?.data?.error || 'Failed to override estimate.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-[1100] flex items-center justify-center p-4" onClick={onClose}>
+      <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" />
+      <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden" onClick={e => e.stopPropagation()}>
+        <div className="h-16 bg-gradient-to-r from-indigo-600 to-blue-700 flex items-end px-6 pb-3">
+          <h2 className="text-white font-bold text-lg">🤖 Adjust Workforce Estimate</h2>
+        </div>
+        <div className="px-6 py-5 space-y-4">
+          <p className="text-sm text-slate-500">{issue.title || 'Civic Issue'} — override the AI recommendation based on ground truth.</p>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Workers</label>
+              <input
+                type="number"
+                min={1}
+                max={50}
+                value={workerCount}
+                onChange={e => setWorkerCount(e.target.value)}
+                className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-xl text-sm font-semibold outline-none focus:ring-2 focus:ring-indigo-500/20"
+              />
+            </div>
+            <div>
+              <label className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Hours</label>
+              <input
+                type="number"
+                min={0.5}
+                max={48}
+                step={0.5}
+                value={estimatedHours}
+                onChange={e => setEstimatedHours(e.target.value)}
+                className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-xl text-sm font-semibold outline-none focus:ring-2 focus:ring-indigo-500/20"
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Reason (optional)</label>
+            <textarea
+              value={overrideReason}
+              onChange={e => setOverrideReason(e.target.value)}
+              rows={2}
+              placeholder="e.g. Site inspection showed larger repair area"
+              className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-indigo-500/20 resize-none"
+            />
+          </div>
+
+          <div className="flex gap-3">
+            <button
+              onClick={onClose}
+              className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 rounded-xl text-sm font-semibold text-slate-700 transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleSave}
+              disabled={saving}
+              className="flex-1 py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 rounded-xl text-sm font-semibold text-white transition-colors"
+            >
+              {saving ? 'Saving…' : 'Save Override'}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Resolution Modal (records actuals for historical learning) ────────────────
+function ResolutionModal({ issue, onClose, onSaved }) {
+  const wf = issue.workforceEstimation || {};
+  const [actualWorkerCount, setActualWorkerCount] = useState(wf.workerCount || 3);
+  const [actualHours, setActualHours] = useState(wf.estimatedHours || 2);
+  const [notes, setNotes] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      await recordResolution(issue._id, {
+        actualWorkerCount: Number(actualWorkerCount),
+        actualHours: Number(actualHours),
+        notes,
+      });
+      onSaved();
+    } catch (err) {
+      alert(err.response?.data?.error || 'Failed to record resolution.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-[1100] flex items-center justify-center p-4" onClick={onClose}>
+      <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" />
+      <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden" onClick={e => e.stopPropagation()}>
+        <div className="h-16 bg-gradient-to-r from-emerald-600 to-green-700 flex items-end px-6 pb-3">
+          <h2 className="text-white font-bold text-lg">✅ Mark Resolved</h2>
+        </div>
+        <div className="px-6 py-5 space-y-4">
+          <p className="text-sm text-slate-500">
+            Record what it actually took to fix this issue. Real data trains future AI estimates.
+          </p>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Workers Used</label>
+              <input
+                type="number"
+                min={1}
+                max={50}
+                value={actualWorkerCount}
+                onChange={e => setActualWorkerCount(e.target.value)}
+                className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-xl text-sm font-semibold outline-none focus:ring-2 focus:ring-emerald-500/20"
+              />
+            </div>
+            <div>
+              <label className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Hours Taken</label>
+              <input
+                type="number"
+                min={0.5}
+                max={72}
+                step={0.5}
+                value={actualHours}
+                onChange={e => setActualHours(e.target.value)}
+                className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-xl text-sm font-semibold outline-none focus:ring-2 focus:ring-emerald-500/20"
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Notes (optional)</label>
+            <textarea
+              value={notes}
+              onChange={e => setNotes(e.target.value)}
+              rows={2}
+              placeholder="What work was done?"
+              className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-emerald-500/20 resize-none"
+            />
+          </div>
+
+          <div className="flex gap-3">
+            <button
+              onClick={onClose}
+              className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 rounded-xl text-sm font-semibold text-slate-700 transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleSave}
+              disabled={saving}
+              className="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 rounded-xl text-sm font-semibold text-white transition-colors"
+            >
+              {saving ? 'Saving…' : 'Resolve Issue'}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Main AdminPage ─────────────────────────────────────────────────────────────
 export default function AdminPage() {
   const [issues,     setIssues]     = useState([]);
@@ -449,6 +672,8 @@ export default function AdminPage() {
   const [search,     setSearch]     = useState('');
   const [filterPriority, setFilterPriority] = useState('All');
   const [citizenModal, setCitizenModal]     = useState(null); // issue object
+  const [overrideModal, setOverrideModal]   = useState(null); // issue object
+  const [resolutionModal, setResolutionModal] = useState(null); // issue object
 
   // ── Load issues (with populate of createdBy) ──
   const loadIssues = useCallback(async () => {
@@ -465,10 +690,20 @@ export default function AdminPage() {
 
   useEffect(() => { loadIssues(); }, [loadIssues]);
 
-  // ── Status advance ──
+  const refreshIssues = async () => {
+    await loadIssues();
+    setOverrideModal(null);
+    setResolutionModal(null);
+  };
+
+  // ── Status advance (Resolved opens the resolution modal first) ──
   const handleAdvance = async (issue) => {
     const next = nextStatus(issue.status);
     if (!next) return;
+    if (next === 'Resolved') {
+      setResolutionModal(issue);
+      return;
+    }
     try {
       setUpdatingId(issue._id);
       await updateIssueStatus(issue._id, next);
@@ -568,6 +803,9 @@ export default function AdminPage() {
 
       {/* ── Map ── */}
       {!loading && !error && <IssueMap issues={issues} />}
+
+      {/* ── Route Optimizer ── */}
+      {!loading && !error && <RoutePlanner />}
 
       {/* ── Tabs ── */}
       <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
@@ -683,6 +921,7 @@ export default function AdminPage() {
                         onAdvance={handleAdvance}
                         isUpdating={updatingId === issue._id}
                         onViewCitizen={setCitizenModal}
+                        onOverride={setOverrideModal}
                       />
                     ))}
                   </div>
@@ -696,6 +935,16 @@ export default function AdminPage() {
       {/* ── Citizen Details Modal ── */}
       {citizenModal && (
         <CitizenModal issue={citizenModal} onClose={() => setCitizenModal(null)} />
+      )}
+
+      {/* ── Workforce Override Modal ── */}
+      {overrideModal && (
+        <OverrideModal issue={overrideModal} onClose={() => setOverrideModal(null)} onSaved={refreshIssues} />
+      )}
+
+      {/* ── Resolution Modal ── */}
+      {resolutionModal && (
+        <ResolutionModal issue={resolutionModal} onClose={() => setResolutionModal(null)} onSaved={refreshIssues} />
       )}
     </div>
   );

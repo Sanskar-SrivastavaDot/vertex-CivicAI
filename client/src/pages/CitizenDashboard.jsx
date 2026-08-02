@@ -97,6 +97,51 @@ function IssueCard({ issue }) {
           <PriorityBadge priority={issue.priority} />
         </div>
 
+        {/* AI Analysis panel */}
+        {(issue.aiAnalysis?.workerRoles?.length > 0 || issue.workforceEstimation?.workerCount) && (
+          <div className="bg-indigo-50/70 border border-indigo-100 rounded-xl px-3 py-2.5 space-y-1.5">
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] font-bold text-indigo-500 uppercase tracking-wider">🤖 AI Analysis</span>
+              {issue.aiAnalysis?.confidence > 0 && (
+                <span className="text-[10px] font-semibold text-indigo-400">
+                  {Math.round(issue.aiAnalysis.confidence * 100)}% confidence
+                </span>
+              )}
+            </div>
+            <div className="flex flex-wrap gap-1.5 text-[11px]">
+              {issue.aiAnalysis?.severity && (
+                <span className="bg-white border border-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full font-medium">
+                  Severity: {issue.aiAnalysis.severity}
+                </span>
+              )}
+              {issue.aiAnalysis?.complexity && (
+                <span className="bg-white border border-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full font-medium">
+                  Complexity: {issue.aiAnalysis.complexity}
+                </span>
+              )}
+              {issue.workforceEstimation?.workerCount && (
+                <span className="bg-white border border-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full font-medium">
+                  ~{issue.workforceEstimation.workerCount} workers · {issue.workforceEstimation.estimatedHours}h
+                </span>
+              )}
+            </div>
+            {issue.aiAnalysis?.workerRoles?.length > 0 && (
+              <div className="flex flex-wrap gap-1">
+                {issue.aiAnalysis.workerRoles.slice(0, 4).map(r => (
+                  <span key={r} className="text-[10px] bg-white border border-indigo-100 text-indigo-600 px-1.5 py-0.5 rounded font-medium">
+                    {r}
+                  </span>
+                ))}
+              </div>
+            )}
+            {issue.aiAnalysis?.damageArea > 0 && (
+              <div className="text-[10px] text-indigo-500 font-medium">
+                Estimated area: {issue.aiAnalysis.damageArea} {issue.aiAnalysis.damageUnit || 'sqm'}
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Meta */}
         <div className="pt-1 border-t border-slate-100 flex flex-col gap-1">
           <div className="text-xs text-slate-400">
